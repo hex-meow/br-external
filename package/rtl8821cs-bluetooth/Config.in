@@ -1,0 +1,3 @@
+config BR2_PACKAGE_RTL8821CS_BLUETOOTH
+        bool "rtl8821cs-bluetooth"
+

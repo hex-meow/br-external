@@ -1,0 +1,11 @@
+[Unit]
+Description=PTP4L
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/sbin/ptp4l -i end0 -H -A -q -s
+
+[Install]
+WantedBy=multi-user.target

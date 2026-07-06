@@ -1,0 +1,170 @@
+#!/bin/sh
+
+# =============================================================================
+# Linux USB Gadget Configuration Script for Emulated Serial (ACM)
+#
+# Description:
+# This script configures a USB gadget on an embedded Linux system to emulate
+# a serial port (ACM - Abstract Control Model). It uses the configfs
+# filesystem, which is the modern standard for configuring USB gadgets.
+# The script automatically detects and uses the first available
+# USB Device Controller (UDC).
+#
+# Requirements:
+# - A Linux kernel with USB gadget support enabled (CONFIG_USB_GADGET).
+# - The configfs filesystem enabled and mounted at /sys/kernel/config.
+# - The USB Abstract Control Model (ACM) driver (CONFIG_USB_F_ACM).
+# - The libcomposite module (CONFIG_USB_LIBCOMPOSITE).
+# - Root privileges to execute the script.
+#
+# Usage:
+# 1. Make the script executable: chmod +x setup_usb_serial.sh
+# 2. Run the script: sudo ./setup_usb_serial.sh
+# 3. To disable the gadget, you can run: sudo ./setup_usb_serial.sh stop
+#
+# =============================================================================
+
+set -e # Exit immediately if a command exits with a non-zero status.
+
+# --- Configuration Variables ---
+# You can customize these values for your device.
+GADGET_NAME="g_serial"
+CONFIGFS_BASE="/sys/kernel/config/usb_gadget"
+GADGET_DIR="${CONFIGFS_BASE}/${GADGET_NAME}"
+
+# USB Device Descriptors
+# Using well-known VID/PID for testing purposes (e.g., Adafruit)
+# For a commercial product, you must use your own registered VID.
+VID="0x1d6b" # Linux Foundation
+PID="0x0104" # Multifunction Composite Gadget
+SERIAL_NUMBER=$(cat /etc/machine-id)
+MANUFACTURER="HEXMEOW"
+PRODUCT_DESC="USB Emulated Serial"
+
+# --- Script Functions ---
+
+# Function to display an error message and exit
+die() {
+    echo "ERROR: $1" >&2
+    exit 1
+}
+
+# Function to clean up and disable the gadget
+cleanup() {
+    echo "--- Disabling and cleaning up USB gadget: ${GADGET_NAME} ---"
+
+    # Check if gadget directory exists before trying to clean up
+    if [ ! -d "${GADGET_DIR}" ]; then
+        echo "Gadget '${GADGET_NAME}' not configured. Nothing to do."
+        return
+    fi
+
+    # Unbind the UDC if it's bound
+    if [ -n "$(cat ${GADGET_DIR}/UDC)" ]; then
+        echo "" > "${GADGET_DIR}/UDC"
+        echo "Unbound from UDC."
+    fi
+
+    # Remove function from configuration
+    # The symlink name is what we need to remove
+    if [ -L "${GADGET_DIR}/configs/c.1/acm.usb0" ]; then
+        rm "${GADGET_DIR}/configs/c.1/acm.usb0"
+        echo "Removed function link."
+    fi
+
+    # Remove the function instance
+    if [ -d "${GADGET_DIR}/functions/acm.usb0" ]; then
+        rmdir "${GADGET_DIR}/functions/acm.usb0"
+        echo "Removed function instance."
+    fi
+
+    # Remove strings
+    rmdir "${GADGET_DIR}/strings/0x409" >/dev/null 2>&1 || true
+    echo "Removed string directory."
+
+    # Remove configuration
+    rmdir "${GADGET_DIR}/configs/c.1" >/dev/null 2>&1 || true
+    echo "Removed configuration directory."
+
+    # Remove the gadget itself
+    rmdir "${GADGET_DIR}"
+    echo "Removed gadget directory."
+    echo "--- Cleanup complete ---"
+}
+
+# Function to set up the gadget
+setup() {
+    echo "--- Setting up USB serial gadget: ${GADGET_NAME} ---"
+
+    # 1. Check for root privileges
+    if [ "$(id -u)" -ne 0 ]; then
+        die "This script must be run as root. Please use sudo."
+    fi
+
+    # 2. Ensure libcomposite is loaded
+    modprobe libcomposite || die "Failed to load libcomposite module."
+    echo "libcomposite module is loaded."
+
+    # 3. Find the first available UDC
+    # UDCs are listed in /sys/class/udc/
+    UDC=$(ls /sys/class/udc/ | head -n 1)
+    if [ -z "${UDC}" ]; then
+        die "No USB Device Controller (UDC) found."
+    fi
+    echo "Found UDC: ${UDC}"
+
+    # 4. Create the gadget directory in configfs
+    # If it already exists, clean it up first for a fresh start
+    if [ -d "${GADGET_DIR}" ]; then
+        echo "Gadget already exists. Cleaning up first."
+        cleanup
+    fi
+    mkdir -p "${GADGET_DIR}" || die "Failed to create gadget directory."
+    cd "${GADGET_DIR}"
+
+    # 5. Configure USB Device Descriptors
+    echo "${VID}" > idVendor
+    echo "${PID}" > idProduct
+    echo "0x0200" > bcdUSB # USB 2.0
+    echo "0x02" > bDeviceClass # CDC Class
+    echo "Created device descriptors."
+
+    # 6. Create String Descriptors
+    # 0x409 is the language code for US English
+    mkdir -p strings/0x409
+    echo "${SERIAL_NUMBER}" > strings/0x409/serialnumber
+    echo "${MANUFACTURER}" > strings/0x409/manufacturer
+    echo "${PRODUCT_DESC}" > strings/0x409/product
+    echo "Created string descriptors."
+
+    # 7. Create the Function
+    # We'll create an ACM (serial) function
+    mkdir -p functions/acm.usb0
+    echo "Created function: acm.usb0"
+
+    # 8. Create the Configuration
+    mkdir -p configs/c.1
+    mkdir -p configs/c.1/strings/0x409
+    echo "Emulated Serial Port" > configs/c.1/strings/0x409/configuration
+    echo "120" > configs/c.1/MaxPower # 120mA
+
+    # 9. Link the function to the configuration
+    # This makes the function active in this configuration
+    ln -s functions/acm.usb0 configs/c.1/
+    echo "Linked function to configuration."
+
+    # 10. Enable the gadget by binding it to the UDC
+    echo "${UDC}" > UDC
+    echo "--- Gadget enabled and bound to ${UDC} ---"
+    echo "A new serial device (e.g., /dev/ttyGS0) should now be available."
+    echo "On the host machine, a new TTY device (e.g., /dev/ttyACM0) should appear."
+}
+
+# --- Main Script Logic ---
+if [ "$1" == "stop" ] || [ "$1" == "disable" ] || [ "$1" == "down" ]; then
+    cleanup
+else
+    setup
+fi
+
+exit 0

@@ -1,0 +1,109 @@
+name: build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    # Heavy full build (kernel + mesa + gstreamer + docker). If the hosted
+    # runner runs out of the ~40 GB disk (after cleanup) or the 6 h job limit,
+    # switch this to a self-hosted runner: `runs-on: [self-hosted, linux]`
+    # and drop the "Free up disk space" / "Install build dependencies" steps.
+    runs-on: ubuntu-latest
+    timeout-minutes: 350            # stay under GitHub's 6 h hard job limit
+    env:
+      FORCE_UNSAFE_CONFIGURE: "1"   # allow running the build as root
+      BUILDROOT_VERSION: "2026.02.1"
+      BR2_DL_DIR: ${{ github.workspace }}/dl
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The hosted runner root fs is ~14 GB free out of the box; this build
+      # needs much more. Reclaim ~25 GB by removing preinstalled toolchains.
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache /usr/local/.ghcup \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+          df -h /
+
+      # Same package set as ci/Dockerfile (debian:13), plus ccache.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bash bc bison build-essential ca-certificates ccache cpio curl \
+            file flex gawk git gzip libncurses-dev libssl-dev locales make \
+            patch perl python3 rsync sed tar unzip wget xz-utils zstd
+          sudo locale-gen en_US.UTF-8
+
+      # dl/ is append-only. Keyed on defconfig + linux-commit so a kernel/config
+      # bump fetches fresh sources, but restore-keys warm-starts from the last dl.
+      # NOTE: this includes the ~3 GB kernel git clone, so the entry is large.
+      # It fits comfortably only if the repo's Actions cache limit is raised
+      # above the 10 GB default (Settings -> Actions -> Caches). If you stay on
+      # 10 GB, add a step to `find dl/ -type d -name git -prune -exec rm -rf {} +`
+      # before this cache saves, at the cost of re-cloning the kernel each run.
+      - name: Cache Buildroot downloads (dl/)
+        uses: actions/cache@v4
+        with:
+          path: dl
+          key: br-dl-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig', 'linux-commit') }}
+          restore-keys: |
+            br-dl-
+
+      - name: Compute ccache week
+        run: |
+          echo "YEAR=$(date +%Y)" >> "$GITHUB_ENV"
+          echo "WEEK=$(date +%U)" >> "$GITHUB_ENV"
+
+      # Weekly-rotating key: refreshes ccache each week (so it doesn't grow
+      # stale/unbounded) while still warm-starting from the previous run/week.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.buildroot-ccache
+          key: br-ccache-${{ env.YEAR }}-w${{ env.WEEK }}-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig') }}
+          restore-keys: |
+            br-ccache-${{ env.YEAR }}-w${{ env.WEEK }}-
+            br-ccache-${{ env.YEAR }}-
+            br-ccache-
+
+      # Cap ccache so it can't blow the shared cache budget (default 5 GiB).
+      - name: Cap ccache size
+        run: |
+          mkdir -p ~/.buildroot-ccache
+          echo 'max_size = 2.0G' > ~/.buildroot-ccache/ccache.conf
+
+      - name: Clone Buildroot
+        run: git clone --depth=1 https://github.com/buildroot/buildroot -b "$BUILDROOT_VERSION" buildroot
+
+      - name: Apply mesa3d panfrost patch
+        working-directory: buildroot
+        run: git apply "${GITHUB_WORKSPACE}/0001-package-mesa3d-allow-gallium-panfrost-without-target.patch"
+
+      - name: Configure
+        working-directory: buildroot
+        run: make BR2_EXTERNAL="${GITHUB_WORKSPACE}" hexmeow_chassis_ctrl_defconfig
+
+      - name: Build
+        working-directory: buildroot
+        run: make
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s -d ~/.buildroot-ccache || true
+
+      - name: Upload rootfs images
+        uses: actions/upload-artifact@v4
+        with:
+          name: rootfs
+          if-no-files-found: error
+          path: |
+            buildroot/output/images/rootfs.ext2.zst
+            buildroot/output/images/rootfs.erofs

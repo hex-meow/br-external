@@ -1,0 +1,11 @@
+[Unit]
+Description=CPU Frequency Configuration
+DefaultDependencies=no
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cpu-frequency-config
+
+[Install]
+WantedBy=basic.target

@@ -1,0 +1,13 @@
+[Unit]
+Description=Check userdata partition
+DefaultDependencies=no
+Requires=dev-disk-by\x2dpartlabel-userdata.device
+After=dev-disk-by\x2dpartlabel-userdata.device
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/check-userdata /dev/disk/by-partlabel/userdata
+RemainAfterExit=yes
+
+[Install]
+RequiredBy=local-fs-pre.target

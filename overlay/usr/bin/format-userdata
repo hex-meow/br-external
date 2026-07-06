@@ -1,0 +1,14 @@
+#!/bin/sh
+echo "WARNING: This script format userdata."
+read -p "Type 'yes' to proceed: " confirmation
+
+# Check if the user typed 'yes'
+if [[ "$confirmation" == "yes" ]]; then
+    umount -f /dev/disk/by-partlabel/userdata
+    echo "Formatting /dev/disk/by-partlabel/userdata..."
+    # Use mkfs.ext4 to format the partition
+    mke2fs -F /dev/disk/by-partlabel/userdata
+    echo "Operation completed."
+else
+    echo "Operation aborted."
+fi

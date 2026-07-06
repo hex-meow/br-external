@@ -1,0 +1,14 @@
+[Unit]
+Description=Create directories in /userdata
+After=userdata.mount
+Requires=userdata.mount
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'mkdir -p /userdata/root-home; mkdir -p /userdata/dropbear;'
+RemainAfterExit=yes
+
+[Install]
+RequiredBy=local-fs.target
+RequiredBy=dropbear.service

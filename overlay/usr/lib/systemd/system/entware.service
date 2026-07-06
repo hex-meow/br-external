@@ -1,0 +1,14 @@
+[Unit]
+Description=Entware Init Script
+After=network.target opt.mount
+Requires=opt.mount
+ConditionFileNotEmpty=/opt/etc/init.d/rc.unslung
+
+[Service]
+Type=oneshot
+ExecStart=/opt/etc/init.d/rc.unslung start
+ExecStop=/opt/etc/init.d/rc.unslung stop
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

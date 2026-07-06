@@ -1,0 +1,5 @@
+menu "Packages"
+source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/rtl8821cs-wifi/Config.in"
+source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/rtl8821cs-bluetooth/Config.in"
+source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/rk-uboot-tools/Config.in"
+endmenu

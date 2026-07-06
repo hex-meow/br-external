@@ -1,0 +1,48 @@
+#!/bin/sh
+
+# This script checks an ext4 filesystem and performs actions based on the fsck return code.
+
+if [ $# -eq 0 ]; then
+  echo "Usage: $0 <device>" >&2
+  exit 16
+fi
+
+DEVICE="$1"
+
+# --- Run fsck and capture the exit code ---
+# The -p flag automatically repairs the filesystem without any questions.
+echo "Running fsck on $DEVICE..."
+fsck.ext4 -v -p "$DEVICE"
+FSCK_STATUS=$?
+
+# --- Take action based on the fsck exit code ---
+case $FSCK_STATUS in
+  0|1)
+    # 0: No errors found
+    # 1: Filesystem errors corrected
+    echo "fsck completed successfully. Exit code: $FSCK_STATUS"
+    # Enable journal
+    tune2fs -O extents,dir_index,has_journal "$DEVICE"
+    exit 0
+    ;;
+  2)
+    # 2: Filesystem errors corrected, reboot required
+    echo "Filesystem errors corrected, but a reboot is required. Rebooting now..."
+    reboot
+    exit 2
+    ;;
+  4|8)
+    # 4: Filesystem errors left uncorrected
+    echo "Uncorrectable filesystem errors found. Formatting $DEVICE..."
+    mkfs.ext4 -t ext4 -F "$DEVICE"
+    # Exit with the status of the mkfs command
+    exit $?
+    ;;
+  *)
+    # 16: Usage or syntax error
+    # 32: Canceled by user request
+    # 128: Shared library error
+    echo "fsck failed with an unhandled error. Exit code: $FSCK_STATUS"
+    exit $FSCK_STATUS
+    ;;
+esac

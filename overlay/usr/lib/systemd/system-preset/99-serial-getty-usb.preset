@@ -1,0 +1,1 @@
+enable serial-getty@.service ttyGS0

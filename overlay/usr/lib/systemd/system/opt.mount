@@ -1,0 +1,14 @@
+[Unit]
+Description=Bind mount /userdata/opt to /opt
+After=userdata.mount
+Requires=userdata.mount
+ConditionPathIsDirectory=/userdata/opt
+
+[Mount]
+What=/userdata/opt
+Where=/opt
+Type=none
+Options=bind
+
+[Install]
+WantedBy=local-fs.target

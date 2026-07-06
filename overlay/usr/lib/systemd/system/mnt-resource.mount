@@ -1,0 +1,11 @@
+[Unit]
+Description=Resource partition mount
+Before=local-fs.target
+
+[Mount]
+What=/dev/disk/by-partlabel/resource
+Where=/mnt/resource
+Options=ro
+
+[Install]
+WantedBy=local-fs.target

@@ -1,0 +1,21 @@
+#!/bin/ash
+
+cd /sys/devices/system/cpu
+
+for policy_dir in cpufreq/policy*; do
+    if [ -d "$policy_dir" ] && [ -f "$policy_dir/scaling_governor" ]; then
+        echo "Setting scaling governor to performance for $policy_dir"
+        echo performance > "$policy_dir/scaling_governor"
+    fi
+done
+
+# Loop through all cpu directories (cpu0, cpu1, cpu2, etc.)
+for cpu_dir in cpu[0-9]*; do
+    # Check if the directory exists and has the cpuidle/state1/disable file
+    if [ -d "$cpu_dir" ] && [ -f "$cpu_dir/cpuidle/state1/disable" ]; then
+        echo "Disabling state1 for $cpu_dir"
+        echo 1 > "$cpu_dir/cpuidle/state1/disable"
+    else
+        echo "Skipping $cpu_dir - cpuidle/state1/disable not found"
+    fi
+done

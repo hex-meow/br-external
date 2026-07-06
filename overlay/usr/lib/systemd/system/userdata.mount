@@ -1,0 +1,15 @@
+[Unit]
+Description=User data mount
+Before=local-fs.target
+After=check-userdata-partition.service
+Requires=check-userdata-partition.service
+
+[Mount]
+What=/dev/disk/by-partlabel/userdata
+Where=/userdata
+Type=ext4
+ReadWriteOnly=yes
+Options=commit=1
+
+[Install]
+RequiredBy=local-fs.target

@@ -1,0 +1,71 @@
+#!/bin/ash
+
+set -e
+
+ORIGINAL_SOURCE="http://bin.entware.net/"
+
+# Check if opt.mount is active
+if [ "$(systemctl is-active opt.mount)" != "active" ]; then
+    mkdir -p /userdata/opt
+    systemctl start opt.mount
+    # Re-check status after starting
+    if [ "$(systemctl is-active opt.mount)" != "active" ]; then
+        echo "Error: opt.mount failed to activate." >&2
+        exit 1
+    fi
+fi
+
+if [ -e "/opt/etc/entware_release" ]; then
+    echo "Entware seems to be already installed."
+    echo "You can run \`source /opt/etc/profile\` to use it."
+    echo "If you you want to re-install entware, you can run 'rm -rf /opt/*' and execute this script again."
+    exit 1
+fi
+
+# Show source selection menu
+echo "Available Entware sources:"
+echo "1) Original ($ORIGINAL_SOURCE)"
+echo "2) BFSU Mirror (http://mirrors.bfsu.edu.cn/entware/)"
+# CQUPT will always redirect to https, which busybox wget does not support
+echo "3) NJU Mirror (http://mirrors.nju.edu.cn/entware/)"
+echo "4) Diversion Mirror (http://entware.diversion.ch/)"
+
+# Get user choice
+while true; do
+    read -p "Select source (1-4): " choice
+    case $choice in
+        1) CHOSEN_SOURCE="$ORIGINAL_SOURCE"; break ;;
+        2) CHOSEN_SOURCE="http://mirrors.bfsu.edu.cn/entware/" ; break ;;
+        3) CHOSEN_SOURCE="http://mirrors.nju.edu.cn/entware/" ; break ;;
+        4) CHOSEN_SOURCE="http://entware.diversion.ch/" ; break ;;
+        *) echo "Invalid selection. Try again." ;;
+    esac
+done
+
+# Download installer
+ARCH="armv7sf-k3.2"
+INSTALLER_URL="${CHOSEN_SOURCE}${ARCH}/installer/generic.sh"
+wget -O /tmp/entware-generic.sh "$INSTALLER_URL"
+
+# Modify installer if not using original source
+if [ "$CHOSEN_SOURCE" != "$ORIGINAL_SOURCE" ]; then
+    # Replace original source references
+    sed -i "s|$ORIGINAL_SOURCE|$CHOSEN_SOURCE|g" /tmp/entware-generic.sh
+
+    # Modify opkg.conf download line
+    sed -i "s#^\(wget .* -O .*opkg.conf\)#\\1 \&\& sed -i \"s|$ORIGINAL_SOURCE|$CHOSEN_SOURCE|g\" /opt/etc/opkg.conf#" /tmp/entware-generic.sh
+fi
+
+# Execute installer
+sh /tmp/entware-generic.sh
+
+# Start entware.service
+systemctl start entware.service
+# Check if entware.service started successfully
+if [ "$(systemctl is-active entware.service)" != "active" ]; then
+    echo "Error: entware.service failed to start." >&2
+    exit 1
+fi
+
+echo "Entware installation completed successfully, and the startup script will run automatically on boot."
+echo "Use systemctl status entware.service to check the status of the service."

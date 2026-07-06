@@ -1,0 +1,129 @@
+From a5359aefe1508eb8aef4c0dfcddc8fb6f0f2ebd7 Mon Sep 17 00:00:00 2001
+From: User <user@user.com>
+Date: Tue, 19 May 2026 16:43:26 +0800
+Subject: [PATCH] package/mesa3d: allow gallium panfrost without target llvm
+
+  Mesa's Panfrost Gallium driver needs LLVM for building its
+  precompiled shader tools, but those tools do not have to be built for
+  or installed on the target.
+
+  Mesa documents the cross-compilation flow as building mesa_clc,
+  vtn_bindgen2, and panfrost_compile on the host, then using
+  -Dmesa-clc=system and -Dprecomp-compiler=system for the target build.
+  Buildroot already builds those tools through host-mesa3d.
+
+  Split the Panfrost dependency from the existing target-side precompile
+  path by adding a host-only precompile marker. Use it for Gallium
+  Panfrost so that selecting the driver no longer forces
+  BR2_PACKAGE_MESA3D_LLVM, Mesa OpenCL, target clang, target libclc, or
+  the target SPIR-V translator stack.
+
+  Keep the existing BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER path for
+  the other users that still rely on the previous target-side dependency
+  model.
+
+  Also make the target SPIRV-Tools Meson option explicit: enable it for
+  RustiCL, where CLC requires it, and disable it otherwise to avoid
+  accidental target-side optional dependency pickup.
+
+  Finally, pass cpp_rtti explicitly to host-mesa3d so its C++ RTTI mode
+  continues to match host-llvm even when Panfrost no longer selects the
+  target LLVM/OpenCL path.
+---
+ package/mesa3d/Config.in | 14 ++++++++++----
+ package/mesa3d/mesa3d.mk | 21 +++++++++++++++++----
+ 2 files changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/package/mesa3d/Config.in b/package/mesa3d/Config.in
+index 8a7811b6a5..eea8f6d4ff 100644
+--- a/package/mesa3d/Config.in
++++ b/package/mesa3d/Config.in
+@@ -27,6 +27,10 @@ config BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
+ 	select BR2_PACKAGE_SPIRV_LLVM_TRANSLATOR
+ 	select BR2_PACKAGE_SPIRV_TOOLS
+ 
++config BR2_PACKAGE_MESA3D_NEEDS_HOST_PRECOMP_COMPILER
++	bool
++	select BR2_HOST_CMAKE_AT_LEAST_3_20 # host-llvm
++
+ config BR2_PACKAGE_MESA3D_LLVM
+ 	bool "llvm support"
+ 	depends on BR2_PACKAGE_LLVM_ARCH_SUPPORTS
+@@ -203,15 +207,17 @@ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_NOUVEAU
+ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_PANFROST
+ 	bool "Gallium panfrost driver"
+ 	depends on BR2_TOOLCHAIN_HAS_SYNC_4 || !BR2_PACKAGE_XORG7 # libxshmfence
+-	depends on BR2_PACKAGE_MESA3D_LLVM
++	depends on BR2_PACKAGE_LLVM_ARCH_SUPPORTS # host-llvm
++	depends on BR2_HOST_GCC_AT_LEAST_7 # host-llvm
+ 	select BR2_PACKAGE_MESA3D_GALLIUM_DRIVER
+-	select BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER
++	select BR2_PACKAGE_MESA3D_NEEDS_HOST_PRECOMP_COMPILER
+ 	select BR2_PACKAGE_MESA3D_RUSTICL_SUPPORTED_DRIVER
+ 	help
+ 	  Mesa driver for ARM Mali Midgard and Bifrost GPUs.
+ 
+-comment "panfrost driver needs llvm"
+-	depends on !BR2_PACKAGE_MESA3D_LLVM
++comment "panfrost driver needs host gcc >= 7"
++	depends on BR2_PACKAGE_LLVM_ARCH_SUPPORTS
++	depends on !BR2_HOST_GCC_AT_LEAST_7
+ 
+ config BR2_PACKAGE_MESA3D_GALLIUM_DRIVER_R300
+ 	bool "Gallium Radeon R300 driver"
+diff --git a/package/mesa3d/mesa3d.mk b/package/mesa3d/mesa3d.mk
+index f082d3c429..72cfd9bc9d 100644
+--- a/package/mesa3d/mesa3d.mk
++++ b/package/mesa3d/mesa3d.mk
+@@ -69,14 +69,17 @@ MESA3D_DEPENDENCIES += \
+ MESA3D_CONF_OPTS += \
+ 	-Dgallium-rusticl=true \
+ 	-Drust_std=2021 \
+-	-Dmesa-clc-bundle-headers=enabled
++	-Dmesa-clc-bundle-headers=enabled \
++	-Dspirv-tools=enabled
+ 
+ MESA3D_MESON_EXTRA_BINARIES += \
+ 	rust=['$(HOST_DIR)/bin/rustc','--target=$(RUSTC_TARGET_NAME)'] \
+ 	rust_ld='$(TARGET_CROSS)gcc'
+ 
+ else
+-MESA3D_CONF_OPTS += -Dgallium-rusticl=false
++MESA3D_CONF_OPTS += \
++	-Dgallium-rusticl=false \
++	-Dspirv-tools=disabled
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_MESA3D_NEEDS_ELFUTILS),y)
+@@ -152,9 +155,13 @@ ifeq ($(BR2_PACKAGE_MESA3D_VULKAN_DRIVER_INTEL),y)
+ MESA3D_DEPENDENCIES += host-python-ply
+ endif
+ 
+-ifeq ($(BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER),y)
++ifneq ($(BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER)$(BR2_PACKAGE_MESA3D_NEEDS_HOST_PRECOMP_COMPILER),)
+ MESA3D_CONF_OPTS += -Dmesa-clc=system -Dprecomp-compiler=system
+-MESA3D_DEPENDENCIES += host-mesa3d spirv-llvm-translator spirv-tools
++MESA3D_DEPENDENCIES += host-mesa3d
++endif
++
++ifeq ($(BR2_PACKAGE_MESA3D_NEEDS_PRECOMP_COMPILER),y)
++MESA3D_DEPENDENCIES += spirv-llvm-translator spirv-tools
+ endif
+ 
+ ifeq ($(BR2_PACKAGE_MESA3D_VULKAN_DRIVER),)
+@@ -310,6 +317,12 @@ HOST_MESA3D_CONF_OPTS = \
+ 	-Dglx=disabled \
+ 	-Dvulkan-drivers=""
+ 
++ifeq ($(BR2_PACKAGE_LLVM_RTTI),y)
++HOST_MESA3D_CONF_OPTS += -Dcpp_rtti=true
++else
++HOST_MESA3D_CONF_OPTS += -Dcpp_rtti=false
++endif
++
+ HOST_MESA3D_DEPENDENCIES = \
+ 	host-libclc \
+ 	host-libdrm \
+-- 
+2.47.3
+

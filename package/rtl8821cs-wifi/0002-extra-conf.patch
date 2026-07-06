@@ -1,0 +1,14 @@
+Index: rtl8821cs-wifi/Makefile
+===================================================================
+--- rtl8821cs-wifi.orig/Makefile
++++ rtl8821cs-wifi/Makefile
+@@ -7,6 +7,9 @@ EXTRA_CFLAGS += -O1
+ #EXTRA_CFLAGS += -pedantic
+ #EXTRA_CFLAGS += -Wshadow -Wpointer-arith -Wcast-qual -Wstrict-prototypes -Wmissing-prototypes
+ 
++EXTRA_CFLAGS += -DCONFIG_RTW_HOSTAPD_ACS
++EXTRA_CFLAGS += -DCONFIG_RTW_IOCTL_SET_COUNTRY
++
+ EXTRA_CFLAGS += -Wno-unused-variable
+ #EXTRA_CFLAGS += -Wno-unused-value
+ #EXTRA_CFLAGS += -Wno-unused-label

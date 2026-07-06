@@ -1,0 +1,3 @@
+config BR2_PACKAGE_HOST_RK_UBOOT_TOOLS
+	bool "Rockchip special uboot tools"
+	select BR2_PACKAGE_HOST_DTC
