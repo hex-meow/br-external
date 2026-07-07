@@ -1,0 +1,44 @@
+name: cleanup-artifacts
+
+# GitHub artifact retention is time-based only (default 90 days); there is no
+# native "keep last N". This scheduled job keeps only the 3 most recent
+# artifacts of EACH name (rootfs, sdk, ...) and deletes the rest, so the
+# account's shared storage quota (Free 500 MB / Pro 1 GB / Team 2 GB) doesn't
+# fill up. Release assets are NOT touched (they live under Releases).
+on:
+  schedule:
+    - cron: "0 1 * * *"   # daily 01:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  actions: write          # deleting artifacts needs actions:write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const KEEP = 3;
+            const all = await github.paginate(
+              github.rest.actions.listArtifactsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+            const byName = {};
+            for (const a of all) (byName[a.name] ??= []).push(a);
+            let deleted = 0;
+            for (const name of Object.keys(byName)) {
+              const list = byName[name]
+                .sort((x, y) => new Date(y.created_at) - new Date(x.created_at));
+              for (const a of list.slice(KEEP)) {
+                core.info(`Deleting ${name} #${a.id} (${a.created_at})`);
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: a.id,
+                });
+                deleted++;
+              }
+            }
+            core.info(`Kept last ${KEEP} of each; deleted ${deleted}.`);
