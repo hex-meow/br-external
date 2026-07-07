@@ -8,13 +8,9 @@ on:
       - "v*.*.*"
 
 jobs:
-  # Reuse the full build (no duplication). Produces the "rootfs" artifact.
+  # Reuse the full public build (no duplication). Produces "rootfs" + "sdk".
   build:
     uses: ./.github/workflows/build.yml
-    # defconfig defaults to the public hexmeow_chassis_ctrl_defconfig.
-    # TODO(private): add a second reusable-call for the superset defconfig once
-    # the private overlay repo + a checkout secret exist, and attach its images
-    # below as private-*. Its source stays out of this public repo.
 
   draft-release:
     needs: build
@@ -27,12 +23,13 @@ jobs:
         with:
           path: dist              # each artifact lands in dist/<artifact-name>/
 
-      - name: Prefix public upgrade files
+      - name: Stage public upgrade files + SDK
         run: |
           mkdir -p out
-          for f in dist/rootfs/*; do
-            cp "$f" "out/public-$(basename "$f")"
-          done
+          for f in dist/rootfs/*; do cp "$f" "out/public-$(basename "$f")"; done
+          # The SDK (relocatable toolchain+sysroot) is a release asset so the
+          # private hex-controller repo's CI can cross-compile against it.
+          cp dist/sdk/*_sdk-buildroot.tar.gz out/ 2>/dev/null || true
           (cd out && sha256sum public-* > sha256sum-public.txt)
           ls -l out
 
@@ -46,4 +43,100 @@ jobs:
           generate_release_notes: true
           files: |
             out/public-*
+            out/*_sdk-buildroot.tar.gz
             out/sha256sum-public.txt
+
+  # ---------------------------------------------------------------------------
+  # Private image: builds the superset defconfig (public + hex-controller) using
+  # the PRIVATE overlay, and appends its rootfs to the same draft release.
+  #
+  # Gated so it is a no-op for forks / anyone without access:
+  #   - set repo VARIABLE  BUILD_PRIVATE = true
+  #   - set repo SECRET    PRIVATE_ACCESS_TOKEN  (fine-grained PAT or App token
+  #     with read access to hex-meow/br-external-private and hex-meow/hex-controller)
+  # The controller SOURCE never enters this repo — only the prebuilt bundle is
+  # pulled, and only the built rootfs is published.
+  # ---------------------------------------------------------------------------
+  private-image:
+    if: ${{ github.repository == 'hex-meow/br-external' && vars.BUILD_PRIVATE == 'true' }}
+    needs: draft-release          # release exists first; this appends to it
+    runs-on: ubuntu-latest         # switch to [self-hosted, linux] if disk/time is tight
+    timeout-minutes: 350
+    permissions:
+      contents: write
+    env:
+      FORCE_UNSAFE_CONFIGURE: "1"
+      BUILDROOT_VERSION: "2026.02.1"
+      BR2_DL_DIR: ${{ github.workspace }}/dl
+      HEX_CONTROLLER_TAG: v0.0.1   # bump to the hex-controller release you want
+    steps:
+      - uses: actions/checkout@v4          # public br-external (self)
+
+      - name: Checkout private overlay
+        uses: actions/checkout@v4
+        with:
+          repository: hex-meow/br-external-private
+          token: ${{ secrets.PRIVATE_ACCESS_TOKEN }}
+          path: private-overlay
+
+      - name: Free up disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache "$AGENT_TOOLSDIRECTORY" || true
+          sudo docker image prune -af || true
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bash bc bison build-essential ca-certificates ccache cpio curl \
+            file flex gawk git gzip libncurses-dev libssl-dev locales make \
+            patch perl python3 rsync sed tar unzip wget xz-utils zstd
+          sudo locale-gen en_US.UTF-8
+
+      - name: Cache dl/ + ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            dl
+            ~/.buildroot-ccache
+          key: br-priv-${{ hashFiles('private-overlay/configs/hexmeow_private_defconfig', 'linux-commit') }}
+          restore-keys: br-priv-
+
+      # Pre-download the private controller bundle into the package dl dir
+      # (buildroot's wget can't authenticate to a private release).
+      - name: Fetch hex-controller bundle
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_ACCESS_TOKEN }}
+        run: |
+          mkdir -p "$BR2_DL_DIR/hex-controller"
+          gh release download "$HEX_CONTROLLER_TAG" -R hex-meow/hex-controller \
+            -p 'hex-controller-*-aarch64.tar.gz' \
+            -O "$BR2_DL_DIR/hex-controller/hex-controller-${HEX_CONTROLLER_TAG}-aarch64.tar.gz"
+
+      - name: Build private image
+        run: |
+          git clone --depth=1 https://github.com/buildroot/buildroot -b "$BUILDROOT_VERSION" buildroot
+          ( cd buildroot && git apply "${GITHUB_WORKSPACE}/0001-package-mesa3d-allow-gallium-panfrost-without-target.patch" )
+          mkdir -p ~/.buildroot-ccache && echo 'max_size = 2.0G' > ~/.buildroot-ccache/ccache.conf
+          make -C buildroot \
+            BR2_EXTERNAL="${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}/private-overlay" \
+            hexmeow_private_defconfig
+          make -C buildroot
+
+      - name: Stage private upgrade files
+        run: |
+          mkdir -p out
+          for f in buildroot/output/images/rootfs.ext2.zst buildroot/output/images/rootfs.erofs; do
+            [ -f "$f" ] && cp "$f" "out/private-$(basename "$f")"
+          done
+          (cd out && sha256sum private-* > sha256sum-private.txt)
+
+      - name: Append private assets to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: ${{ github.ref_name }}
+          files: |
+            out/private-*
+            out/sha256sum-private.txt
