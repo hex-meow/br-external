@@ -939,14 +939,29 @@
 };
 
 &i2c3 {
+	/* I2C3 muxed to the m1 pins: SCL=GPIO0_C6, SDA=GPIO0_C7 (see schematic
+	 * nets I2C3_SCL_M1 / I2C3_SDA_M1). Shared 400 kHz bus: QMI8658 + ADS1015.
+	 */
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2c3m0_xfer>;
+	pinctrl-0 = <&i2c3m1_xfer>;
+	clock-frequency = <400000>;
 	status = "okay";
 
-	qmi8658: imu@6a {
+	/* QMI8658A 6-axis IMU. SDO/SA0 tied high -> 7-bit addr 0x6b.
+	 * INT1/INT2 are not wired; use an hrtimer software trigger for capture.
+	 */
+	qmi8658: imu@6b {
 		compatible = "qst,qmi8658";
-		reg = <0x6a>;
+		reg = <0x6b>;
 		vdd-supply = <&vcc_3v3_s3>;
+	};
+
+	/* TI ADS1015 4-ch 12-bit ADC. ADDR tied to GND -> 7-bit addr 0x48. */
+	ads1015: adc@48 {
+		compatible = "ti,ads1015";
+		reg = <0x48>;
+		#address-cells = <1>;
+		#size-cells = <0>;
 	};
 };
 
