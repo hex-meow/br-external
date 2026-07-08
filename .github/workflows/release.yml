@@ -132,6 +132,49 @@ jobs:
           done
           (cd out && sha256sum private-* > sha256sum-private.txt)
 
+      # Publish the private image publicly to Cloudflare R2 (downloads.hexmeow.com).
+      # Gated on the R2_BUCKET repo VARIABLE; skips cleanly until you configure R2.
+      # Secrets: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
+      # (R2 S3 API token, "Object Read & Write", scoped to the one bucket).
+      - name: Publish images to Cloudflare R2
+        if: ${{ vars.R2_BUCKET != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+          AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+          EP: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ vars.R2_BUCKET }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          IMG=buildroot/output/images
+          work="$RUNNER_TEMP/r2/$TAG"; mkdir -p "$work"
+          cp "$IMG/rootfs.ext2.zst" "$IMG/rootfs.erofs" "$work/"
+          ( cd "$work"
+            for f in rootfs.ext2.zst rootfs.erofs; do sha256sum "$f" | awk '{print $1}' > "$f.sha256"; done
+            e2s=$(cat rootfs.ext2.zst.sha256); e2b=$(stat -c%s rootfs.ext2.zst)
+            efs=$(cat rootfs.erofs.sha256);    efb=$(stat -c%s rootfs.erofs)
+            printf '{"product":"br-external","version":"%s","released":"%s","images":{"ext2":{"url":"releases/%s/rootfs.ext2.zst","sha256":"%s","bytes":%s},"erofs":{"url":"releases/%s/rootfs.erofs","sha256":"%s","bytes":%s}}}\n' \
+              "$TAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$e2s" "$e2b" "$TAG" "$efs" "$efb" > manifest.json )
+          up() { aws s3 cp "$1" "$2" --endpoint-url "$EP" --content-type "$3" --cache-control "$4"; }
+          IMM="public, max-age=31536000, immutable"
+          for f in rootfs.ext2.zst rootfs.erofs; do
+            up "$work/$f"        "s3://$BUCKET/br-external/releases/$TAG/$f"        application/octet-stream "$IMM"
+            up "$work/$f.sha256" "s3://$BUCKET/br-external/releases/$TAG/$f.sha256" text/plain               "$IMM"
+          done
+          up "$work/manifest.json" "s3://$BUCKET/br-external/releases/$TAG/manifest.json" application/json "$IMM"
+          up "$work/manifest.json" "s3://$BUCKET/br-external/latest.json"                 application/json "no-cache"
+          # regenerate the human-browsable index from the release list
+          vers=$(aws s3 ls "s3://$BUCKET/br-external/releases/" --endpoint-url "$EP" | awk '{print $2}' | tr -d / | sort -rV)
+          { echo '<!doctype html><meta charset=utf-8><title>br-external images</title><h1>br-external releases</h1><ul>'
+            for v in $vers; do
+              echo "<li><b>$v</b> — <a href=\"releases/$v/rootfs.ext2.zst\">ext2</a> · <a href=\"releases/$v/rootfs.erofs\">erofs</a> · <a href=\"releases/$v/manifest.json\">manifest</a></li>"
+            done
+            echo '</ul>'; } > "$work/index.html"
+          up "$work/index.html" "s3://$BUCKET/br-external/index.html" text/html "no-cache"
+
       - name: Append private assets to the release
         uses: softprops/action-gh-release@v2
         with:
