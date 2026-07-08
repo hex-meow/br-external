@@ -68,7 +68,6 @@ jobs:
       FORCE_UNSAFE_CONFIGURE: "1"
       BUILDROOT_VERSION: "2026.02.1"
       BR2_DL_DIR: ${{ github.workspace }}/dl
-      HEX_CONTROLLER_TAG: v0.0.1   # bump to the hex-controller release you want
     steps:
       - uses: actions/checkout@v4          # public br-external (self)
 
@@ -109,10 +108,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_ACCESS_TOKEN }}
         run: |
+          # Version is the single source of truth in the overlay package .mk,
+          # so the fetched bundle can never drift from what buildroot expects.
+          TAG=$(grep -oP 'HEX_CONTROLLER_VERSION\s*=\s*\K\S+' \
+                private-overlay/package/hex-controller/hex-controller.mk)
+          echo "hex-controller version = $TAG"
           mkdir -p "$BR2_DL_DIR/hex-controller"
-          gh release download "$HEX_CONTROLLER_TAG" -R hex-meow/hex-controller \
-            -p 'hex-controller-*-aarch64.tar.gz' \
-            -O "$BR2_DL_DIR/hex-controller/hex-controller-${HEX_CONTROLLER_TAG}-aarch64.tar.gz"
+          gh release download "$TAG" -R hex-meow/hex-controller \
+            -p "hex-controller-$TAG-aarch64.tar.gz" \
+            -O "$BR2_DL_DIR/hex-controller/hex-controller-$TAG-aarch64.tar.gz"
 
       - name: Build private image
         run: |
