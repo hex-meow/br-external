@@ -16,6 +16,7 @@ RestartSec=1
 #
 # Soft-RT: keep the router responsive under load but strictly below the 1kHz
 # control loops (P5 will add CPUAffinity to the LITTLE cores + worker caps).
+CPUAffinity=0-3
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=20
 

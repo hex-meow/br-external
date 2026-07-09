@@ -33,7 +33,11 @@ if test "${board}" = "evb_rk3576"; then
     env set fdt_name rk3576-hexmeow
 
     part uuid ${devtype} ${devnum}:${rootfspart} rootfsuuid
-    setenv bootargs "$bootargs root=PARTUUID=${rootfsuuid} console=tty0 console=ttyFIQ0 earlycon=uart8250,mmio32,0x2ad40000 ro rootwait"
+    # RT 隔离(09 §9):cpu4-7 = A72 大核,留给 1kHz robot 控制环(robot 进程自置
+    # affinity + SCHED_FIFO 60-80);系统/zenohd/supervisor 留在 cpu0-3(A53,
+    # 各 unit 已设 CPUAffinity)。isolcpus=domain 把 A72 摘出调度均衡,
+    # nohz_full + rcu_nocbs 消除隔离核上的 tick/RCU 干扰。
+    setenv bootargs "$bootargs root=PARTUUID=${rootfsuuid} console=tty0 console=ttyFIQ0 earlycon=uart8250,mmio32,0x2ad40000 ro rootwait isolcpus=domain,managed_irq,4-7 nohz_full=4-7 rcu_nocbs=4-7 irqaffinity=0-3"
 fi
 echo "Board: ${fdt_name}"
 load ${devtype} ${devnum}:${rootfspart} ${fdt_addr_r} /boot/rockchip/${fdt_name}.dtb

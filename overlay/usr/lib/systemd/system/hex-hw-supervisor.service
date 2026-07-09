@@ -12,6 +12,7 @@ Restart=always
 RestartSec=1
 # 消费端(robot 进程)对安全类 key 有 fail-safe 语义(04 v0.2 修订 2),supervisor 重启
 # 窗口是定义过的安全状态。WatchdogSec 待 P3 真驱动 + sd_notify 喂狗一起上。
+CPUAffinity=0-3
 CPUSchedulingPolicy=fifo
 CPUSchedulingPriority=22
 

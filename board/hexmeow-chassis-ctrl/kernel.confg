@@ -2,6 +2,9 @@ CONFIG_DEFAULT_HOSTNAME="localhost"
 CONFIG_SYSVIPC=y
 CONFIG_POSIX_MQUEUE=y
 CONFIG_NO_HZ=y
+# P5(09 §9):隔离核(A72,cpu4-7)全 dynticks —— boot.cmd 的 nohz_full=4-7 需要它,
+# 否则参数被静默忽略。配合 isolcpus + rcu_nocbs 消除 1kHz 环所在核的 tick/RCU 干扰。
+CONFIG_NO_HZ_FULL=y
 CONFIG_HIGH_RES_TIMERS=y
 CONFIG_BPF_SYSCALL=y
 CONFIG_PREEMPT_RT=y
