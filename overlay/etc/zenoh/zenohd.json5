@@ -1,18 +1,72 @@
-// Robot-local zenoh router config (P1 topology; ACL tightening lands in P4 —
-// see robot-overall-design/09-controller-hal.md §5 and the validated smoke
-// config referenced there before enabling access_control here).
+// Robot-local zenoh router(P4:ACL 生产配置,板上矩阵验证过 —— 见 09 §5/§11)。
+// 三档写权限:LAN 只读 hw 遥测 + 与 robot 级 API 全互动;本机(lo/unixsock)全读写;
+// 危险操作(总线电源)根本不在此平面(unixsock + 文件权限,09 §6)。
+// 语义提示:订阅数据的下发是 egress 方向的 put —— LAN 的出向规则必须放行 put/reply,
+// 否则订阅能声明却收不到数据(T4 实测教训)。deny > allow > default(deny)。
 {
   listen: {
-    // The ONLY LAN-facing zenoh listener on the robot. On-board processes
-    // connect to it as CLIENTS via localhost and open no listeners of their
-    // own, so this is the single choke point where ACL will be enforced.
+    // 唯一 LAN 入口;本机进程一律 client 连 127.0.0.1(零监听零 scouting)。
     endpoints: ["tcp/0.0.0.0:7447"],
   },
   scouting: {
-    // Router-side multicast scouting stays ON so host PCs / GUIs / bridges
-    // discover the robot (05 决策 6). On-board clients run with scouting OFF
-    // and explicit connect endpoints.
+    // router 侧保持开:上位机 GUI/桥靠组播发现机器人(05 决策 6)。
     multicast: { enabled: true },
     gossip: { enabled: true },
+  },
+  access_control: {
+    enabled: true,
+    default_permission: "deny",
+    rules: [
+      {
+        id: "local-rw",                    // 本机:全读写(supervisor、launcher、robot 进程)
+        key_exprs: ["hexmeow/**", "bench/**"],
+        messages: ["put", "delete", "query", "reply", "declare_subscriber", "declare_queryable",
+                   "liveliness_token", "declare_liveliness_subscriber", "liveliness_query"],
+        flows: ["ingress", "egress"],
+        permission: "allow",
+      },
+      {
+        id: "lan-interact-in",             // LAN 入向:robot 级 API 全互动 + 读一切
+        // 宽放行 + 下面对 hw/** 的显式 deny(zenoh 的 ** 可匹配零 chunk,层级深度分不开
+        // controller/robot 级,所以用 hw/ 前缀 + deny-beats-allow 收口)。
+        // liveliness_token 必须给:04 的 session 靠客户端自己的 liveliness 绑定。
+        key_exprs: ["hexmeow/**", "bench/**"],
+        messages: ["put", "query", "declare_subscriber",
+                   "liveliness_token", "declare_liveliness_subscriber", "liveliness_query"],
+        flows: ["ingress"],
+        permission: "allow",
+      },
+      {
+        id: "lan-out",                     // LAN 出向:数据下发/应答/liveliness 传播
+        key_exprs: ["hexmeow/**", "bench/**"],
+        messages: ["put", "reply", "liveliness_token"],
+        flows: ["egress"],
+        permission: "allow",
+      },
+      {
+        id: "lan-hw-readonly",             // LAN 对 controller 级 hw:禁一切写入向
+        key_exprs: ["hexmeow/*/hw/**"],
+        messages: ["put", "delete", "liveliness_token"],
+        flows: ["ingress"],
+        permission: "deny",
+      },
+      {
+        id: "lan-no-queryable",            // LAN 禁声明 queryable:防冒充 RPC 服务端劫持查询
+        key_exprs: ["hexmeow/**", "bench/**"],
+        messages: ["declare_queryable"],
+        flows: ["ingress"],
+        permission: "deny",
+      },
+    ],
+    subjects: [
+      { id: "local", interfaces: ["lo"] },
+      { id: "local-uds", link_protocols: ["unixsock-stream"] },   // lo 匹配不到 unixsock
+      { id: "lan", interfaces: ["end0", "eth0", "wlan0"] },
+    ],
+    policies: [
+      { id: "p-local", rules: ["local-rw"], subjects: ["local", "local-uds"] },
+      { id: "p-lan",   rules: ["lan-interact-in", "lan-out", "lan-hw-readonly", "lan-no-queryable"],
+        subjects: ["lan"] },
+    ],
   },
 }

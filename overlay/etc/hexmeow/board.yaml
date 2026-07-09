@@ -10,7 +10,14 @@ zenoh:
 resources:
   imu0:
     kind: imu        # 消息类型 ImuData,key = <vendor>/<cid>/hw/imu0
-    driver: mock     # P3 起可换 qmi8658(板载 I2C)等真驱动
+    driver: mock     # 真驱动(qmi8658 I2C 等)待最终版 PCB/设备树 —— P3b TODO
     rate_hz: 100
-  # vbus0:  { kind: vbus,  driver: adc-xxx }     # 能测总线电压的板卡变体才写
-  # remote0:{ kind: remote, driver: evdev }      # 遥控器/手柄(P3)
+  estop0:
+    kind: estop      # EstopState;mock 驱动用 /run/hexmeow/mock-estop 文件 touch/rm 触发
+    driver: mock
+  remote0:
+    kind: remote     # RemoteState;真驱动(evdev/SBUS)待最终版 PCB —— P3b TODO
+    driver: mock
+  vbus0:
+    kind: vbus       # VbusState;能测总线电压的板卡变体才写
+    driver: mock
