@@ -1,0 +1,19 @@
+# 开源 controller 级硬件 supervisor(robot-overall-design/09 §2):
+# 按 /etc/hexmeow/board.yaml 驱动板载外设,发布到 <vendor>/<cid>/hw/**。
+[Unit]
+Description=hex hardware supervisor (controller-level HAL)
+# client 连接本就无限重试;After= 只为确定性快启动。
+Wants=zenohd.service
+After=zenohd.service
+
+[Service]
+ExecStart=/usr/bin/hex-hw-supervisor /etc/hexmeow/board.yaml
+Restart=always
+RestartSec=1
+# 消费端(robot 进程)对安全类 key 有 fail-safe 语义(04 v0.2 修订 2),supervisor 重启
+# 窗口是定义过的安全状态。WatchdogSec 待 P3 真驱动 + sd_notify 喂狗一起上。
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=22
+
+[Install]
+WantedBy=multi-user.target

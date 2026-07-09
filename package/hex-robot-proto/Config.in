@@ -1,0 +1,8 @@
+config BR2_PACKAGE_HEX_ROBOT_PROTO
+	bool "hex-robot-proto"
+	help
+	  hex-meow public protobuf contract (.proto files, SHA-pinned).
+	  Staging-only: consumed at build time by hex-hw-supervisor (and
+	  any future on-image component speaking the robot API).
+
+	  https://github.com/hex-meow/hex-robot-proto

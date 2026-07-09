@@ -1,0 +1,16 @@
+# 板卡配置(hex-hw-supervisor 的唯一事实源,09 §2):这块板有哪些 controller 级硬件。
+# 镜像变体安装为 /etc/hexmeow/board.yaml。
+# 出厂后可改(09 §13.1):写入 + sync 后【断电重启生效】,supervisor 不做热 reload。
+#
+# 三态语义(01):列在这里 = "支持"(hw/info 可见);对应 key 的 liveliness = "在不在"。
+
+zenoh:
+  connect: "tcp/127.0.0.1:7447"   # 本机 router(镜像的 zenohd.service)
+
+resources:
+  imu0:
+    kind: imu        # 消息类型 ImuData,key = <vendor>/<cid>/hw/imu0
+    driver: mock     # P3 起可换 qmi8658(板载 I2C)等真驱动
+    rate_hz: 100
+  # vbus0:  { kind: vbus,  driver: adc-xxx }     # 能测总线电压的板卡变体才写
+  # remote0:{ kind: remote, driver: evdev }      # 遥控器/手柄(P3)

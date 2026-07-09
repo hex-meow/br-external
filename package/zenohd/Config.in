@@ -1,0 +1,17 @@
+config BR2_PACKAGE_ZENOHD
+	bool "zenohd"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_HOST_RUSTC
+	help
+	  Eclipse Zenoh router daemon. Runs as the robot-local hub
+	  (systemd unit "zenohd.service"): all on-board processes
+	  (hardware supervisor, robot controllers) connect to it as
+	  clients on localhost; host PCs / GUIs / ROS2 bridges reach
+	  the robot through its LAN listener.
+
+	  Built natively by buildroot (glibc) so it always matches the
+	  image ABI. Note: upstream's *-musl-standalone release binary
+	  is dynamically linked against musl and cannot run on this
+	  image — do not substitute it.
+
+	  https://github.com/eclipse-zenoh/zenoh

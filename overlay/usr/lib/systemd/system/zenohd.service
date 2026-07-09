@@ -1,0 +1,23 @@
+# Zenoh router: the robot-local hub. Owned by the IMAGE (not the launcher) so
+# the open HAL / robot processes can rely on it from boot, independent of the
+# closed stack's lifecycle. See robot-overall-design/09-controller-hal.md §3.
+[Unit]
+Description=Zenoh router (robot-local hub)
+After=network.target
+Wants=network.target
+
+[Service]
+ExecStart=/usr/bin/zenohd -c /etc/zenoh/zenohd.json5
+Restart=always
+RestartSec=1
+# zenohd exits if it cannot bind its listener (e.g. port taken by a stale
+# instance); Restart=always converges once the port frees. The launcher must
+# run with zenohd.manage=false on the product so there is never a second owner.
+#
+# Soft-RT: keep the router responsive under load but strictly below the 1kHz
+# control loops (P5 will add CPUAffinity to the LITTLE cores + worker caps).
+CPUSchedulingPolicy=fifo
+CPUSchedulingPriority=20
+
+[Install]
+WantedBy=multi-user.target

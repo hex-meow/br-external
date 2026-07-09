@@ -1,0 +1,18 @@
+// Robot-local zenoh router config (P1 topology; ACL tightening lands in P4 —
+// see robot-overall-design/09-controller-hal.md §5 and the validated smoke
+// config referenced there before enabling access_control here).
+{
+  listen: {
+    // The ONLY LAN-facing zenoh listener on the robot. On-board processes
+    // connect to it as CLIENTS via localhost and open no listeners of their
+    // own, so this is the single choke point where ACL will be enforced.
+    endpoints: ["tcp/0.0.0.0:7447"],
+  },
+  scouting: {
+    // Router-side multicast scouting stays ON so host PCs / GUIs / bridges
+    // discover the robot (05 决策 6). On-board clients run with scouting OFF
+    // and explicit connect endpoints.
+    multicast: { enabled: true },
+    gossip: { enabled: true },
+  },
+}

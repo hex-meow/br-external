@@ -1,0 +1,14 @@
+config BR2_PACKAGE_HEX_HW_SUPERVISOR
+	bool "hex-hw-supervisor"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_HOST_RUSTC
+	select BR2_PACKAGE_HEX_ROBOT_PROTO
+	help
+	  Open-source controller-level hardware supervisor: drives the
+	  board's on-board peripherals (IMU / estop / remote / vbus ...)
+	  per the board config (/etc/hexmeow/board.yaml) and publishes
+	  them on the <vendor>/<cid>/hw/** zenoh keyspace, with per-
+	  resource liveliness and a hw/info capability queryable.
+
+	  Design: robot-overall-design/09-controller-hal.md. Source
+	  lives in this BR2_EXTERNAL tree (hex-hw-supervisor/).
