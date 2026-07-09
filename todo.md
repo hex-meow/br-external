@@ -22,3 +22,8 @@
       no-default-features + termios2,100000 8E2 上机冒烟 = 测试门 T6)
 - [ ] vbus: ADC(IIO)
 - [ ] 总线电源:内核态保持机制(测试门 T5,DT 定默认态)+ supervisor unixsock 通道(09 §6)
+
+## 验收:换网场景实测(zenohd-netwatch,2026-07-09 板上模拟已过,待真实环境复验)
+- [ ] 机器人接入网络 A 正常运行 → 拔线 → 插入网络 B(不同网段/DHCP):
+      预期 ~10s 内 journalctl -u zenohd-netwatch 出现"地址集变化"并自动重启 zenohd,
+      B 网络上的机器用组播 scout 能发现且 hello 的 locator 是 B 网段新 IP;本地栈无感。

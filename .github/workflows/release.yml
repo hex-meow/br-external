@@ -1,14 +1,18 @@
 name: release
 
-# Push a semver tag (e.g. v1.2.3) -> build the image and create a DRAFT release
-# with the upgrade files attached. Draft = you review, then click Publish.
+# tag vX.Y.Z -> 构建公共镜像(+SDK 社区福利)与私有镜像,全部附到 DRAFT release。
+# 人工点 Publish 即审核门 -> publish-r2.yml 才把镜像上传 downloads.hexmeow.com。
+# 设计:robot-overall-design/08(v0.3) / 09。安全基线:action 钉 SHA、
+# persist-credentials:false、显式文件清单、concurrency。
 on:
   push:
-    tags:
-      - "v*.*.*"
+    tags: ["v*.*.*"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  # Reuse the full public build (no duplication). Produces "rootfs" + "sdk".
   build:
     uses: ./.github/workflows/build.yml
 
@@ -16,51 +20,45 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write            # required to create the release / upload assets
+      contents: write
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          path: dist              # each artifact lands in dist/<artifact-name>/
-
+          path: dist
       - name: Stage public upgrade files + SDK
         run: |
+          set -euo pipefail
           mkdir -p out
           for f in dist/rootfs/*; do cp "$f" "out/public-$(basename "$f")"; done
-          # The SDK (relocatable toolchain+sysroot) is a release asset so the
-          # private hex-controller repo's CI can cross-compile against it.
-          cp dist/sdk/*_sdk-buildroot.tar.gz out/ 2>/dev/null || true
+          # SDK = 社区福利(第三方对公共镜像编 glibc 应用);发布链不消费它。缺了就硬失败。
+          cp dist/sdk/*_sdk-buildroot.tar.gz out/
           (cd out && sha256sum public-* > sha256sum-public.txt)
           ls -l out
-
-      # Release ASSETS do not expire and do not count toward Actions storage,
-      # unlike the build artifacts above (which cleanup-artifacts.yml prunes).
       - name: Create draft release
-        uses: softprops/action-gh-release@v2   # pin to a commit SHA for supply-chain safety
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           draft: true
           name: ${{ github.ref_name }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             out/public-*
             out/*_sdk-buildroot.tar.gz
             out/sha256sum-public.txt
 
   # ---------------------------------------------------------------------------
-  # Private image: builds the superset defconfig (public + hex-controller) using
-  # the PRIVATE overlay, and appends its rootfs to the same draft release.
-  #
-  # Gated so it is a no-op for forks / anyone without access:
-  #   - set repo VARIABLE  BUILD_PRIVATE = true
-  #   - set repo SECRET    PRIVATE_ACCESS_TOKEN  (fine-grained PAT or App token
-  #     with read access to hex-meow/br-external-private and hex-meow/hex-controller)
-  # The controller SOURCE never enters this repo — only the prebuilt bundle is
-  # pulled, and only the built rootfs is published.
+  # 私有镜像:公共 defconfig + overlay 片段(CI 生成,无手工拷贝)+ 预置的
+  # 静态 musl controller bundle。门控使 fork 恒为绿:
+  #   - 仓库变量 BUILD_PRIVATE=true(fork 不继承 -> skip)
+  #   - secret PRIVATE_ACCESS_TOKEN:只读 hex-meow/hex-controller 的
+  #     fine-grained token(注意 contents:read 即源码钥匙,建议 GitHub App 短时 token)
+  #   - 提交 controller-ref 文件(hex-controller 的 tag)后才设 BUILD_PRIVATE
   # ---------------------------------------------------------------------------
   private-image:
     if: ${{ github.repository == 'hex-meow/br-external' && vars.BUILD_PRIVATE == 'true' }}
-    needs: draft-release          # release exists first; this appends to it
-    runs-on: ubuntu-latest         # switch to [self-hosted, linux] if disk/time is tight
+    needs: draft-release
+    runs-on: ubuntu-latest
     timeout-minutes: 350
     permissions:
       contents: write
@@ -69,20 +67,40 @@ jobs:
       BUILDROOT_VERSION: "2026.02.1"
       BR2_DL_DIR: ${{ github.workspace }}/dl
     steps:
-      - uses: actions/checkout@v4          # public br-external (self)
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with: { persist-credentials: false }
 
-      - name: Checkout private overlay
-        uses: actions/checkout@v4
+      - name: Resolve controller ref (committed pin, linux-commit style)
+        id: cref
+        run: |
+          [ -f controller-ref ] || { echo "::error::controller-ref 不存在。先提交它(hex-controller 的 tag)再设 vars.BUILD_PRIVATE"; exit 1; }
+          echo "ref=$(cat controller-ref | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+
+      # 只取 overlay 目录:controller 源码不进公共 runner(R1)。
+      - name: Checkout private overlay (sparse)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          repository: hex-meow/br-external-private
+          repository: hex-meow/hex-controller
           token: ${{ secrets.PRIVATE_ACCESS_TOKEN }}
-          path: private-overlay
+          ref: ${{ steps.cref.outputs.ref }}
+          path: private-src
+          sparse-checkout: buildroot-overlay
+          persist-credentials: false
+
+      - name: Assert overlay pin consistency
+        run: |
+          REF="${{ steps.cref.outputs.ref }}"
+          V=$(grep -oP 'HEX_CONTROLLER_VERSION\s*=\s*\K\S+' \
+                private-src/buildroot-overlay/package/hex-controller/hex-controller.mk)
+          [ "$V" = "$REF" ] || { echo "::error::overlay .mk VERSION=$V != controller-ref $REF"; exit 1; }
 
       - name: Free up disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-                      /opt/hostedtoolcache "$AGENT_TOOLSDIRECTORY" || true
+                      /opt/hostedtoolcache /usr/local/.ghcup \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
           sudo docker image prune -af || true
+          df -h /
 
       - name: Install build dependencies
         run: |
@@ -94,96 +112,70 @@ jobs:
           sudo locale-gen en_US.UTF-8
 
       - name: Cache dl/ + ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             dl
             ~/.buildroot-ccache
-          key: br-priv-${{ hashFiles('private-overlay/configs/hexmeow_private_defconfig', 'linux-commit') }}
-          restore-keys: br-priv-
+          key: br-priv-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig', 'linux-commit', 'controller-ref') }}
+          restore-keys: |
+            br-priv-
+            br-ccache-
 
-      # Pre-download the private controller bundle into the package dl dir
-      # (buildroot's wget can't authenticate to a private release).
-      - name: Fetch hex-controller bundle
+      - name: Fetch controller bundle (pre-seed BR2_DL_DIR)
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_ACCESS_TOKEN }}
         run: |
-          # Version is the single source of truth in the overlay package .mk,
-          # so the fetched bundle can never drift from what buildroot expects.
-          TAG=$(grep -oP 'HEX_CONTROLLER_VERSION\s*=\s*\K\S+' \
-                private-overlay/package/hex-controller/hex-controller.mk)
-          echo "hex-controller version = $TAG"
+          REF="${{ steps.cref.outputs.ref }}"
           mkdir -p "$BR2_DL_DIR/hex-controller"
-          gh release download "$TAG" -R hex-meow/hex-controller \
-            -p "hex-controller-$TAG-aarch64.tar.gz" \
-            -O "$BR2_DL_DIR/hex-controller/hex-controller-$TAG-aarch64.tar.gz"
+          gh release download "$REF" -R hex-meow/hex-controller \
+            -p "hex-controller-$REF-aarch64.tar.gz" \
+            -O "$BR2_DL_DIR/hex-controller/hex-controller-$REF-aarch64.tar.gz"
 
-      - name: Build private image
+      # 轻量兼容闸门(ABI 闸门随 musl 消失,08 v0.3):
+      #  - zenoh client(bundle)与镜像 zenohd 必须同版(硬失败)
+      #  - proto pin 不一致只告警(契约演进是纯增量,01)
+      - name: Compatibility assertions (BUILD_INFO)
+        run: |
+          REF="${{ steps.cref.outputs.ref }}"
+          tar xzf "$BR2_DL_DIR/hex-controller/hex-controller-$REF-aarch64.tar.gz" \
+              --wildcards -O "*/BUILD_INFO" > build_info
+          cat build_info
+          BZ=$(grep -oP '^zenoh=\K.+' build_info)
+          IZ=$(grep -oP 'ZENOHD_VERSION = \K.+' package/zenohd/zenohd.mk)
+          [ "$BZ" = "$IZ" ] || { echo "::error::bundle zenoh=$BZ != 镜像 zenohd=$IZ"; exit 1; }
+          BP=$(grep -oP '^hex-robot-proto=\K.+' build_info)
+          IP=$(grep -oP 'HEX_ROBOT_PROTO_VERSION = \K.+' package/hex-robot-proto/hex-robot-proto.mk)
+          [ "$BP" = "$IP" ] || echo "::warning::proto pin 不一致 bundle=$BP image=$IP(纯增量演进下可接受)"
+
+      - name: Build private image (public defconfig + fragment)
         run: |
           git clone --depth=1 https://github.com/buildroot/buildroot -b "$BUILDROOT_VERSION" buildroot
-          ( cd buildroot && git apply "${GITHUB_WORKSPACE}/0001-package-mesa3d-allow-gallium-panfrost-without-target.patch" )
+          ( cd buildroot && git apply "$GITHUB_WORKSPACE/0001-package-mesa3d-allow-gallium-panfrost-without-target.patch" )
           mkdir -p ~/.buildroot-ccache && echo 'max_size = 2.0G' > ~/.buildroot-ccache/ccache.conf
           make -C buildroot \
-            BR2_EXTERNAL="${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}/private-overlay" \
-            hexmeow_private_defconfig
+            BR2_EXTERNAL="$GITHUB_WORKSPACE:$GITHUB_WORKSPACE/private-src/buildroot-overlay" \
+            hexmeow_chassis_ctrl_defconfig
+          cat private-src/buildroot-overlay/configs/private-fragment.config >> buildroot/.config
+          make -C buildroot olddefconfig
+          grep -q '^BR2_PACKAGE_HEX_CONTROLLER=y' buildroot/.config || { echo "::error::fragment 未生效"; exit 1; }
           make -C buildroot
 
       - name: Stage private upgrade files
         run: |
+          set -euo pipefail
           mkdir -p out
           for f in buildroot/output/images/rootfs.ext2.zst buildroot/output/images/rootfs.erofs; do
-            [ -f "$f" ] && cp "$f" "out/private-$(basename "$f")"
+            cp "$f" "out/private-$(basename "$f")"
           done
           (cd out && sha256sum private-* > sha256sum-private.txt)
 
-      # Publish the private image publicly to Cloudflare R2 (downloads.hexmeow.com).
-      # Gated on the R2_BUCKET repo VARIABLE; skips cleanly until you configure R2.
-      # Secrets: R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
-      # (R2 S3 API token, "Object Read & Write", scoped to the one bucket).
-      - name: Publish images to Cloudflare R2
-        if: ${{ vars.R2_BUCKET != '' }}
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          AWS_DEFAULT_REGION: auto
-          AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
-          AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
-          EP: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          BUCKET: ${{ vars.R2_BUCKET }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          set -euo pipefail
-          IMG=buildroot/output/images
-          work="$RUNNER_TEMP/r2/$TAG"; mkdir -p "$work"
-          cp "$IMG/rootfs.ext2.zst" "$IMG/rootfs.erofs" "$work/"
-          ( cd "$work"
-            for f in rootfs.ext2.zst rootfs.erofs; do sha256sum "$f" | awk '{print $1}' > "$f.sha256"; done
-            e2s=$(cat rootfs.ext2.zst.sha256); e2b=$(stat -c%s rootfs.ext2.zst)
-            efs=$(cat rootfs.erofs.sha256);    efb=$(stat -c%s rootfs.erofs)
-            printf '{"product":"br-external","version":"%s","released":"%s","images":{"ext2":{"url":"releases/%s/rootfs.ext2.zst","sha256":"%s","bytes":%s},"erofs":{"url":"releases/%s/rootfs.erofs","sha256":"%s","bytes":%s}}}\n' \
-              "$TAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$e2s" "$e2b" "$TAG" "$efs" "$efb" > manifest.json )
-          up() { aws s3 cp "$1" "$2" --endpoint-url "$EP" --content-type "$3" --cache-control "$4"; }
-          IMM="public, max-age=31536000, immutable"
-          for f in rootfs.ext2.zst rootfs.erofs; do
-            up "$work/$f"        "s3://$BUCKET/br-external/releases/$TAG/$f"        application/octet-stream "$IMM"
-            up "$work/$f.sha256" "s3://$BUCKET/br-external/releases/$TAG/$f.sha256" text/plain               "$IMM"
-          done
-          up "$work/manifest.json" "s3://$BUCKET/br-external/releases/$TAG/manifest.json" application/json "$IMM"
-          up "$work/manifest.json" "s3://$BUCKET/br-external/latest.json"                 application/json "no-cache"
-          # regenerate the human-browsable index from the release list
-          vers=$(aws s3 ls "s3://$BUCKET/br-external/releases/" --endpoint-url "$EP" | awk '{print $2}' | tr -d / | sort -rV)
-          { echo '<!doctype html><meta charset=utf-8><title>br-external images</title><h1>br-external releases</h1><ul>'
-            for v in $vers; do
-              echo "<li><b>$v</b> — <a href=\"releases/$v/rootfs.ext2.zst\">ext2</a> · <a href=\"releases/$v/rootfs.erofs\">erofs</a> · <a href=\"releases/$v/manifest.json\">manifest</a></li>"
-            done
-            echo '</ul>'; } > "$work/index.html"
-          up "$work/index.html" "s3://$BUCKET/br-external/index.html" text/html "no-cache"
-
       - name: Append private assets to the release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           draft: true
           name: ${{ github.ref_name }}
+          fail_on_unmatched_files: true
           files: |
             out/private-*
             out/sha256sum-private.txt

@@ -28,7 +28,7 @@ jobs:
       DEFCONFIG: ${{ inputs.defconfig || 'hexmeow_chassis_ctrl_defconfig' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       # The hosted runner root fs is ~14 GB free out of the box; this build
       # needs much more. Reclaim ~25 GB by removing preinstalled toolchains.
@@ -58,7 +58,7 @@ jobs:
       # 10 GB, add a step to `find dl/ -type d -name git -prune -exec rm -rf {} +`
       # before this cache saves, at the cost of re-cloning the kernel each run.
       - name: Cache Buildroot downloads (dl/)
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: dl
           key: br-dl-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig', 'linux-commit') }}
@@ -73,7 +73,7 @@ jobs:
       # Weekly-rotating key: refreshes ccache each week (so it doesn't grow
       # stale/unbounded) while still warm-starting from the previous run/week.
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.buildroot-ccache
           key: br-ccache-${{ env.YEAR }}-w${{ env.WEEK }}-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig') }}
@@ -116,7 +116,7 @@ jobs:
         run: ccache -s -d ~/.buildroot-ccache || true
 
       - name: Upload rootfs images
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rootfs
           if-no-files-found: error
@@ -126,8 +126,8 @@ jobs:
 
       - name: Upload SDK
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: sdk
-          if-no-files-found: warn
+          if-no-files-found: error
           path: buildroot/output/images/*_sdk-buildroot.tar.gz

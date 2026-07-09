@@ -1,0 +1,69 @@
+name: publish-r2
+
+# 人工 Publish release(审核门)之后,才把私有镜像上传 R2(downloads.hexmeow.com)。
+# v0.1 的缺陷 #6 修复:tag 时不再抢跑。latest.json 带 semver 单调保护(缺陷 #7)。
+on:
+  release:
+    types: [published]
+
+concurrency:
+  group: publish-r2
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    if: ${{ github.repository == 'hex-meow/br-external' && vars.R2_BUCKET != '' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_REQUEST_CHECKSUM_CALCULATION: WHEN_REQUIRED
+      AWS_RESPONSE_CHECKSUM_VALIDATION: WHEN_REQUIRED
+      EP: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      BUCKET: ${{ vars.R2_BUCKET }}
+      TAG: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download private assets from the published release
+        run: |
+          set -euo pipefail
+          mkdir -p work && cd work
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'private-rootfs*'
+          ls -l
+      - name: Upload to R2 (immutable release dir + guarded latest.json + index)
+        run: |
+          set -euo pipefail
+          cd work
+          mv private-rootfs.ext2.zst rootfs.ext2.zst
+          mv private-rootfs.erofs rootfs.erofs 2>/dev/null || true
+          for f in rootfs.*; do sha256sum "$f" | awk '{print $1}' > "$f.sha256"; done
+          e2s=$(cat rootfs.ext2.zst.sha256); e2b=$(stat -c%s rootfs.ext2.zst)
+          efs=$(cat rootfs.erofs.sha256 2>/dev/null || echo -); efb=$(stat -c%s rootfs.erofs 2>/dev/null || echo 0)
+          printf '{"product":"br-external","version":"%s","released":"%s","images":{"ext2":{"url":"releases/%s/rootfs.ext2.zst","sha256":"%s","bytes":%s},"erofs":{"url":"releases/%s/rootfs.erofs","sha256":"%s","bytes":%s}}}\n' \
+            "$TAG" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TAG" "$e2s" "$e2b" "$TAG" "$efs" "$efb" > manifest.json
+          up() { aws s3 cp "$1" "$2" --endpoint-url "$EP" --content-type "$3" --cache-control "$4"; }
+          IMM="public, max-age=31536000, immutable"
+          for f in rootfs.ext2.zst rootfs.erofs; do
+            [ -f "$f" ] || continue
+            up "$f"        "s3://$BUCKET/br-external/releases/$TAG/$f"        application/octet-stream "$IMM"
+            up "$f.sha256" "s3://$BUCKET/br-external/releases/$TAG/$f.sha256" text/plain               "$IMM"
+          done
+          up manifest.json "s3://$BUCKET/br-external/releases/$TAG/manifest.json" application/json "$IMM"
+          # latest.json 单调保护:补发旧 tag 不回退
+          CUR=$(aws s3 cp "s3://$BUCKET/br-external/latest.json" - --endpoint-url "$EP" 2>/dev/null | grep -oP '"version":"\K[^"]+' || echo "v0.0.0")
+          NEW=$(printf '%s\n%s\n' "$CUR" "$TAG" | sort -V | tail -1)
+          if [ "$NEW" = "$TAG" ] && [ "$TAG" != "$CUR" ]; then
+            up manifest.json "s3://$BUCKET/br-external/latest.json" application/json "no-cache"
+          else
+            echo "::warning::latest.json 保持 $CUR(本次 $TAG 不更新指针)"
+          fi
+          vers=$(aws s3 ls "s3://$BUCKET/br-external/releases/" --endpoint-url "$EP" | awk '{print $2}' | tr -d / | sort -rV)
+          { echo '<!doctype html><meta charset=utf-8><title>br-external images</title><h1>br-external releases</h1><ul>'
+            for v in $vers; do
+              echo "<li><b>$v</b> — <a href=\"releases/$v/rootfs.ext2.zst\">ext2</a> · <a href=\"releases/$v/rootfs.erofs\">erofs</a> · <a href=\"releases/$v/manifest.json\">manifest</a></li>"
+            done
+            echo '</ul>'; } > index.html
+          up index.html "s3://$BUCKET/br-external/index.html" text/html "no-cache"
