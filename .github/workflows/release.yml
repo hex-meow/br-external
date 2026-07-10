@@ -111,16 +111,23 @@ jobs:
             patch perl python3 rsync sed tar unzip wget xz-utils zstd
           sudo locale-gen en_US.UTF-8
 
-      - name: Cache dl/ + ccache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # 只 restore 不 save:tag ref 上保存的 cache 别的 tag 永远读不到(cache 按 ref 隔离,
+      # 只有默认分支的对外共享),而 master 的 build.yml 每次 push 都在续热同族缓存。
+      # 关键:restore 的 path 集合必须与 master 保存时逐字一致 —— actions/cache 的
+      # "version" 由 path 集哈希决定,集合不同连 restore-keys 都匹配不上(v0.0.3 首跑
+      # 全冷 3h+ 的根因:旧写法把 dl+ccache 合成一个条目)。
+      - name: Restore dl/ (from master builds)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: |
-            dl
-            ~/.buildroot-ccache
-          key: br-priv-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig', 'linux-commit', 'controller-ref') }}
-          restore-keys: |
-            br-priv-
-            br-ccache-
+          path: dl
+          key: br-dl-${{ hashFiles('configs/hexmeow_chassis_ctrl_defconfig', 'linux-commit') }}
+          restore-keys: br-dl-
+      - name: Restore ccache (from master builds)
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.buildroot-ccache
+          key: br-ccache-tag-run-restore-only
+          restore-keys: br-ccache-
 
       - name: Fetch controller bundle (pre-seed BR2_DL_DIR)
         env:
