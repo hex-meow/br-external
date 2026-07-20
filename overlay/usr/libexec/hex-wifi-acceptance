@@ -1,0 +1,77 @@
+#!/bin/sh
+# Read-only production acceptance checks for the target image.
+set -eu
+
+fail() {
+    echo "FAIL: $*" >&2
+    exit 1
+}
+
+check_service() {
+    SERVICE=$1
+    [ "$(systemctl is-active "$SERVICE")" = "active" ] ||
+        fail "$SERVICE is not active"
+    [ "$(systemctl is-enabled "$SERVICE")" = "enabled" ] ||
+        fail "$SERVICE is not enabled"
+}
+
+check_mode() {
+    PATHNAME=$1
+    EXPECTED=$2
+    case "$EXPECTED" in
+        700) EXPECTED_SYMBOLIC='?rwx------' ;;
+        600) EXPECTED_SYMBOLIC='?rw-------' ;;
+        *) fail "unsupported expected mode $EXPECTED" ;;
+    esac
+    ACTUAL=$(LC_ALL=C ls -ld "$PATHNAME" 2>/dev/null | awk '{ print substr($1, 1, 10) }') ||
+        fail "cannot inspect $PATHNAME"
+    [ -n "$ACTUAL" ] || fail "cannot inspect $PATHNAME"
+    case "$ACTUAL" in
+        $EXPECTED_SYMBOLIC) ;;
+        *) fail "$PATHNAME mode is $ACTUAL, expected $EXPECTED" ;;
+    esac
+}
+
+check_service zenohd.service
+check_service wpa_supplicant-wlan0.service
+check_service hex-wifi.service
+check_service zenohd-netwatch.service
+
+[ "$(systemctl show hex-wifi.service -p LimitCORE --value)" = "0" ] ||
+    fail "hex-wifi core dumps are not disabled"
+[ "$(systemctl show wpa_supplicant-wlan0.service -p LimitCORE --value)" = "0" ] ||
+    fail "wpa_supplicant core dumps are not disabled"
+
+check_mode /userdata/hexmeow/wifi 700
+check_mode /userdata/hexmeow/wifi/wpa_supplicant.conf 600
+check_mode /userdata/hexmeow/wifi/revision 600
+check_mode /run/hex-wifi.sock 600
+
+PID=$(systemctl show hex-wifi.service -p MainPID --value)
+[ "$PID" -gt 1 ] || fail "hex-wifi has no main process"
+
+CMDLINE=$(tr '\000' ' ' <"/proc/$PID/cmdline")
+ENVIRON=$(tr '\000' '\n' <"/proc/$PID/environ")
+case "$CMDLINE" in
+    *passphrase* | *password* | *psk*) fail "secret-like argument found in daemon argv" ;;
+esac
+case "$ENVIRON" in
+    *PASSPHRASE=* | *PASSWORD=* | *PSK=*) fail "secret-like variable found in daemon environment" ;;
+esac
+
+RESPONSES=$(hex-wifi status --json; hex-wifi list --json) ||
+    fail "local read-only API failed"
+printf '%s\n' "$RESPONSES" | grep -q '"passphrase"' &&
+    fail "passphrase field found in read-only API response"
+
+if [ -n "${HEX_WIFI_SECRET_CANARY:-}" ]; then
+    journalctl -b -u hex-wifi.service -u wpa_supplicant-wlan0.service --no-pager |
+        grep -F -- "$HEX_WIFI_SECRET_CANARY" >/dev/null &&
+        fail "secret canary found in journal"
+fi
+
+find /userdata/hexmeow/wifi -maxdepth 1 -name '.revision.*.tmp' -print |
+    grep -q . && fail "stale revision temporary file found"
+
+echo "PASS: hex-wifi target acceptance"
+hex-wifi status

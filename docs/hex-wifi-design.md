@@ -186,6 +186,7 @@ hexmeow/<cid>/rpc/wifi/forget_all
 - 使用 query/reply，不用 pub/sub 写配置；每次修改都有明确成功或错误响应。
 - `status`、`scan`、`networks` 和错误响应永不返回 PSK/passphrase。
 - `set` 中的 passphrase 是 write-only 字段，不进入 journal。
+- `hex-wifi` 与专用 wpa_supplicant unit 禁止 core dump，避免崩溃镜像保存凭据。
 - SSID 以 1–32 字节处理；文本入口默认 UTF-8，但 wire schema 应能明确承载任意 SSID
   字节，避免字符串转义导致配置注入。
 - WPA2 passphrase 限制为 8–63 字节；64 位十六进制原始 PSK 必须是独立显式类型。
@@ -225,12 +226,15 @@ hex-wifi forget-all
 
 每次修改由 daemon 串行执行：
 
-1. 校验 country、SSID、passphrase、priority 和请求 revision。
+1. 校验 country、SSID、passphrase 和请求 revision。
 2. 在 wpa_supplicant 中创建完整但尚未启用的新 network entry。
-3. 所有 `SET_NETWORK` 成功后才 enable/select。
-4. 保存配置；失败则撤销临时 entry。
-5. 可选等待关联和 DHCP；超时恢复 last-known-good entry。
-6. 更新 revision 和 job 状态。
+3. 保存“旧配置 + 禁用 candidate”；失败则撤销 candidate，旧配置不动。
+4. select candidate 并等待关联；超时恢复 last-known-good entry。
+5. 关联成功后，先原子写入并 fsync 新 revision，再开始删除旧 entry。
+6. enable candidate、保存最终配置并更新 job 状态。
 
 `set` 在新 entry 完整配置前不得删除当前可用配置。错误密码不能破坏有线网络或 USB
-串口恢复路径。
+串口恢复路径。revision 落盘之后、最终配置落盘之前掉电时，重启会得到旧的
+last-known-good 配置和一个跳号后的 revision；这种保守跳号优于“新配置配旧 revision”。
+`forget/forget_all` 同样先持久化 revision 再做破坏性操作，失败时 RECONFIGURE 回到
+磁盘上的旧配置。

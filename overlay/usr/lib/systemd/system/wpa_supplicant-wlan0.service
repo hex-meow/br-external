@@ -15,6 +15,7 @@ ExecStartPre=/usr/bin/hex-wifi init
 ExecStart=/usr/sbin/wpa_supplicant -i wlan0 -D nl80211 -c /userdata/hexmeow/wifi/wpa_supplicant.conf
 Restart=on-failure
 RestartSec=2
+LimitCORE=0
 
 [Install]
 WantedBy=multi-user.target

@@ -7,7 +7,7 @@
 # Public standalone repository. Keep the full commit SHA for reproducible
 # images. During local development, point HEX_WIFI_OVERRIDE_SRCDIR at the
 # sibling checkout from Buildroot local.mk.
-HEX_WIFI_VERSION = 997a8767c4deebb8119dd858e44c38f50e6b6ee8
+HEX_WIFI_VERSION = 329297a026c50d9f8f63214379df9febb73c3c56
 HEX_WIFI_SITE = $(call github,hex-meow,hex-wifi,$(HEX_WIFI_VERSION))
 HEX_WIFI_LICENSE = MIT
 HEX_WIFI_LICENSE_FILES = LICENSE

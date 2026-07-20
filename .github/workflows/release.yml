@@ -168,6 +168,18 @@ jobs:
           grep -q '^BR2_PACKAGE_HEX_CONTROLLER=y' buildroot/.config || { echo "::error::fragment 未生效"; exit 1; }
           make -C buildroot
 
+      - name: Verify private image is a public-image superset
+        run: |
+          set -euo pipefail
+          T=buildroot/output/target
+          test -x "$T/usr/bin/hex-wifi"
+          test -x "$T/usr/bin/zenohd"
+          test -x "$T/usr/libexec/hex-wifi-acceptance"
+          test -x "$T/usr/bin/launcher"
+          test -x "$T/usr/bin/hex-controller"
+          test -L "$T/etc/systemd/system/multi-user.target.wants/hex-wifi.service"
+          test -L "$T/etc/systemd/system/multi-user.target.wants/hexmeow.service"
+
       - name: Stage private upgrade files
         run: |
           set -euo pipefail

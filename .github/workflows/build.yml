@@ -103,6 +103,18 @@ jobs:
         working-directory: buildroot
         run: make
 
+      - name: Verify public image contract
+        run: |
+          set -euo pipefail
+          T=buildroot/output/target
+          test -x "$T/usr/bin/hex-wifi"
+          test -x "$T/usr/bin/zenohd"
+          test -x "$T/usr/libexec/hex-wifi-acceptance"
+          test -L "$T/etc/systemd/system/multi-user.target.wants/hex-wifi.service"
+          test ! -e "$T/usr/bin/launcher"
+          test ! -e "$T/usr/bin/hex-controller"
+          sh -n overlay/usr/libexec/hex-wifi-acceptance
+
       # Relocatable SDK (toolchain + target sysroot incl. libudev etc.) so the
       # private hex-controller app can cross-compile against the exact glibc/ABI
       # of this rootfs. Skipped on PRs to save time.
