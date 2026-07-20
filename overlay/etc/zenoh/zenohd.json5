@@ -6,8 +6,10 @@
 // 或按设计规则放进 hw/。adminspace 写有独立开关(默认 false),不受此影响。
 {
   listen: {
-    // 唯一 LAN 入口;本机进程一律 client 连 127.0.0.1(零监听零 scouting)。
-    endpoints: ["tcp/0.0.0.0:7447"],
+    // 唯一 LAN 入口;Linux 默认 net.ipv6.bindv6only=0 时一个 IPv6-any socket
+    // 同时接受 IPv6 与 IPv4。这样保留 IPv4/DHCP/IPv4LL,也允许通过 IPv6
+    // link-local 直连;本机进程仍一律 client 连 127.0.0.1(零监听零 scouting)。
+    endpoints: ["tcp/[::]:7447"],
   },
   scouting: {
     // router 侧保持开:上位机 GUI/桥靠组播发现机器人(05 决策 6)。

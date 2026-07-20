@@ -3,3 +3,7 @@ Name=end0
 
 [Network]
 DHCP=ipv4
+# IPv6 link-local is created immediately.  If DHCPv4 is unavailable for a
+# while (for example, a controller is cabled directly to a laptop), also
+# claim an RFC 3927 IPv4 link-local address while DHCP keeps retrying.
+LinkLocalAddressing=yes
