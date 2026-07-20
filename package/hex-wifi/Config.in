@@ -1,14 +1,16 @@
 config BR2_PACKAGE_HEX_WIFI
 	bool "hex-wifi"
+	depends on BR2_USE_MMU
+	depends on BR2_TOOLCHAIN_HAS_THREADS
 	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
 	select BR2_PACKAGE_HOST_RUSTC
+	select BR2_PACKAGE_WPA_SUPPLICANT
+	select BR2_PACKAGE_WPA_SUPPLICANT_CTRL_IFACE
+	select BR2_PACKAGE_WPA_SUPPLICANT_NL80211
 	help
 	  Public Wi-Fi provisioning service and local CLI for Hex Meow
 	  controllers. It owns Wi-Fi configuration transactions and exposes
-	  a bounded request/reply protocol over a protected Unix socket.
-
-	  The current M1 package contains the protocol and mock backend only;
-	  do not enable it in a product defconfig until the wpa_supplicant
-	  backend and systemd integration land.
+	  a bounded request/reply protocol over a protected Unix socket. The
+	  production backend uses the native wpa_supplicant control socket.
 
 	  https://github.com/hex-meow/hex-wifi

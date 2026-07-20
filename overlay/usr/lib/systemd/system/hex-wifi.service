@@ -1,0 +1,17 @@
+[Unit]
+Description=Hex Meow Wi-Fi provisioning service
+Requires=wpa_supplicant-wlan0.service
+After=wpa_supplicant-wlan0.service
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+RuntimeDirectory=hex-wifi
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/hex-wifi daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

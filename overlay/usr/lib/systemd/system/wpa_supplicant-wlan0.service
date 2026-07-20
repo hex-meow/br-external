@@ -1,0 +1,20 @@
+[Unit]
+Description=WPA supplicant for wlan0
+Requires=userdata.mount
+After=userdata.mount
+Requires=sys-subsystem-net-devices-wlan0.device
+After=sys-subsystem-net-devices-wlan0.device
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+RuntimeDirectory=wpa_supplicant
+RuntimeDirectoryMode=0750
+ExecStartPre=/usr/bin/hex-wifi init
+ExecStart=/usr/sbin/wpa_supplicant -i wlan0 -D nl80211 -c /userdata/hexmeow/wifi/wpa_supplicant.conf
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
