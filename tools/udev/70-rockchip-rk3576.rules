@@ -1,0 +1,3 @@
+# Rockchip RK3576 rockusb device in Loader or Maskrom mode.
+# Keep this before 73-seat-late.rules so TAG+="uaccess" is applied by logind.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2207", ATTR{idProduct}=="350e", MODE="0660", GROUP="plugdev", TAG+="uaccess"

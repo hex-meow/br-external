@@ -59,9 +59,11 @@ cleanup() {
         return
     fi
 
-    # Unbind the UDC if it's bound
-    if [ -n "$(cat ${GADGET_DIR}/UDC)" ]; then
-        echo "" > "${GADGET_DIR}/UDC"
+    # Unbind the UDC if it is bound. Do this only after we know the gadget
+    # directory exists, and quote every configfs path.
+    CURRENT_UDC=$(cat "${GADGET_DIR}/UDC" 2>/dev/null || true)
+    if [ -n "${CURRENT_UDC}" ]; then
+        printf '\n' > "${GADGET_DIR}/UDC"
         echo "Unbound from UDC."
     fi
 
@@ -72,19 +74,31 @@ cleanup() {
         echo "Removed function link."
     fi
 
-    # Remove the function instance
+    # Configuration strings must be removed before the configuration itself.
+    # Omitting this directory used to leave the gadget half-deleted after a
+    # getty restart.
+    if [ -d "${GADGET_DIR}/configs/c.1/strings/0x409" ]; then
+        rmdir "${GADGET_DIR}/configs/c.1/strings/0x409"
+        echo "Removed configuration strings."
+    fi
+
+    # Remove configuration
+    if [ -d "${GADGET_DIR}/configs/c.1" ]; then
+        rmdir "${GADGET_DIR}/configs/c.1"
+        echo "Removed configuration directory."
+    fi
+
+    # Remove the function instance after all configuration links are gone.
     if [ -d "${GADGET_DIR}/functions/acm.usb0" ]; then
         rmdir "${GADGET_DIR}/functions/acm.usb0"
         echo "Removed function instance."
     fi
 
-    # Remove strings
-    rmdir "${GADGET_DIR}/strings/0x409" >/dev/null 2>&1 || true
-    echo "Removed string directory."
-
-    # Remove configuration
-    rmdir "${GADGET_DIR}/configs/c.1" >/dev/null 2>&1 || true
-    echo "Removed configuration directory."
+    # Remove gadget strings.
+    if [ -d "${GADGET_DIR}/strings/0x409" ]; then
+        rmdir "${GADGET_DIR}/strings/0x409"
+        echo "Removed string directory."
+    fi
 
     # Remove the gadget itself
     rmdir "${GADGET_DIR}"
@@ -113,11 +127,19 @@ setup() {
     fi
     echo "Found UDC: ${UDC}"
 
-    # 4. Create the gadget directory in configfs
-    # If it already exists, clean it up first for a fresh start
+    # 4. Create the gadget directory in configfs. A repeated start must not
+    # bounce a working USB connection; clean up only partial configurations.
     if [ -d "${GADGET_DIR}" ]; then
-        echo "Gadget already exists. Cleaning up first."
-        cleanup
+        CURRENT_UDC=$(cat "${GADGET_DIR}/UDC" 2>/dev/null || true)
+        if [ -n "${CURRENT_UDC}" ] && \
+           [ -L "${GADGET_DIR}/configs/c.1/acm.usb0" ] && \
+           [ -d "${GADGET_DIR}/functions/acm.usb0" ]; then
+            echo "Gadget is already configured and bound to ${CURRENT_UDC}."
+            return
+        else
+            echo "Partial gadget configuration exists. Cleaning it up first."
+            cleanup
+        fi
     fi
     mkdir -p "${GADGET_DIR}" || die "Failed to create gadget directory."
     cd "${GADGET_DIR}"
@@ -161,7 +183,7 @@ setup() {
 }
 
 # --- Main Script Logic ---
-if [ "$1" == "stop" ] || [ "$1" == "disable" ] || [ "$1" == "down" ]; then
+if [ "$1" = "stop" ] || [ "$1" = "disable" ] || [ "$1" = "down" ]; then
     cleanup
 else
     setup

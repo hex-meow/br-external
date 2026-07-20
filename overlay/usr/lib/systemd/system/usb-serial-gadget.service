@@ -1,5 +1,7 @@
 [Unit]
 Description=USB Serial Gadget
+Requires=sys-kernel-config.mount
+After=sys-kernel-config.mount
 Before=serial-getty@ttyGS0.service
 
 [Service]
@@ -8,6 +10,8 @@ User=root
 Restart=on-failure
 RestartSec=3s
 ExecStart=/usr/bin/usb-serial-gadget
+ExecStop=/usr/bin/usb-serial-gadget stop
+RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
