@@ -174,9 +174,11 @@ update_config=1
 hexmeow/<cid>/wifi/status
 hexmeow/<cid>/wifi/scan
 hexmeow/<cid>/wifi/networks
+hexmeow/<cid>/wifi/jobs/<job_id>
 hexmeow/<cid>/rpc/wifi/validate
 hexmeow/<cid>/rpc/wifi/set
 hexmeow/<cid>/rpc/wifi/forget
+hexmeow/<cid>/rpc/wifi/forget_all
 ```
 
 要求：
@@ -189,9 +191,10 @@ hexmeow/<cid>/rpc/wifi/forget
 - WPA2 passphrase 限制为 8–63 字节；64 位十六进制原始 PSK 必须是独立显式类型。
 - 修改带 `request_id` 和配置 revision，避免 GUI 重试或多个客户端互相覆盖。
 
-换网可能切断发起请求的 Wi-Fi 链路，因此 `set` 采用异步 job：先验证并返回
-`job_id/accepted`，再应用；客户端通过 status 查询结果。第一版从 `end0` 配网时链路不受
-影响，仍应保留失败超时和 last-known-good 回滚设计。
+换网可能切断发起请求的 Wi-Fi 链路，因此 `set/forget/forget_all` 采用异步 job：
+先返回 `job_id/accepted`，再应用；客户端通过 `wifi/jobs/<job_id>` 查询结果。
+同一 `request_id` 重试返回原 job，同时只允许一个修改 job 活跃。第一版从 `end0`
+配网时链路不受影响，仍应保留失败超时和 last-known-good 回滚设计。
 
 本地 CLI 对应提供：
 
@@ -210,9 +213,9 @@ hex-wifi forget-all
 
 当前 `zenohd` 是明文 TCP 且 ACL 为 default-allow。落地 Wi-Fi RPC 时：
 
-- `status/scan` 可以从 `end0`、`wlan0` 读取。
-- 在没有客户端认证前，`set/forget` 默认只允许从 `end0` 进入；本机 Unix socket 不受
-  LAN ACL 影响。
+- `status/scan/networks/jobs` 可以从 `end0`、`wlan0` 读取。
+- 在没有客户端认证前，`validate/set/forget/forget_all` 默认只允许从 `end0`
+  进入；本机 Unix socket 不受 LAN ACL 影响。
 - 以后需要通过 Wi-Fi 远程修改时，启用 TLS；需要身份授权时启用 mTLS，并使用证书
   身份匹配 ACL。
 - 启用 TLS 后必须同时禁止普通 TCP transport/scouting fallback，不能只增加一个 TLS

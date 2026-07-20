@@ -1,7 +1,7 @@
 # 见 /usr/bin/zenohd-netwatch.sh 头部注释与 09 §3。取代早期的 oneshot zenohd-netjoin
 # (只覆盖开机竞态;本监视器额外覆盖换网/换租约 —— zenohd 的 scout locator 启动时缓存,实测)。
 [Unit]
-Description=Restart zenohd when end0 addresses change (multicast/locator refresh)
+Description=Restart zenohd when LAN addresses change (multicast/locator refresh)
 After=zenohd.service
 Wants=zenohd.service
 

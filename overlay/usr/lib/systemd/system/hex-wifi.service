@@ -1,7 +1,8 @@
 [Unit]
 Description=Hex Meow Wi-Fi provisioning service
 Requires=wpa_supplicant-wlan0.service
-After=wpa_supplicant-wlan0.service
+Wants=zenohd.service
+After=wpa_supplicant-wlan0.service zenohd.service
 
 [Service]
 Type=simple

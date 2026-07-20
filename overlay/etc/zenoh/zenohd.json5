@@ -35,12 +35,21 @@
         flows: ["ingress"],
         permission: "deny",
       },
+      {
+        id: "wlan-wifi-readonly",          // 未启用客户端认证前,换 Wi-Fi 只允许从有线 end0 发起
+        key_exprs: ["hexmeow/*/rpc/wifi/**"],
+        messages: ["query"],
+        flows: ["ingress"],
+        permission: "deny",
+      },
     ],
     subjects: [
       { id: "lan", interfaces: ["end0", "eth0", "wlan0"] },
+      { id: "wlan", interfaces: ["wlan0"] },
     ],
     policies: [
       { id: "p-lan", rules: ["lan-hw-readonly", "lan-no-queryable"], subjects: ["lan"] },
+      { id: "p-wlan-wifi", rules: ["wlan-wifi-readonly"], subjects: ["wlan"] },
     ],
   },
 }
