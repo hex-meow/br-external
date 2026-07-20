@@ -5,4 +5,5 @@ source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/rk-uboot-tools/Config.in"
 source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/zenohd/Config.in"
 source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/hex-robot-proto/Config.in"
 source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/hex-hw-supervisor/Config.in"
+source "$BR2_EXTERNAL_HEX_EMBEDDED_PATH/package/hex-wifi/Config.in"
 endmenu
